@@ -1,4 +1,7 @@
 Shared = Shared or {}
+--- Framework stuff
+
+Shared.Notify = 'ox' -- 'ox' or 'qb'
 
 --- Items
 Shared.MaleSeed = 'weedplant_seedm'

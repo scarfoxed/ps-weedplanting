@@ -47,16 +47,46 @@ local RayCastCamera = function(dist)
     return hit, endPos, entityHit, surfaceNormal
 end
 
+
+local PROGconversion = {
+    disableMovement = 'move',
+    disableCarMovement = 'car',
+    disableCombat = 'combat',
+    disableMouse = 'mouse'
+}
+
+--- Converts the disableControls table to the correct format for the ox_lib library
+---@param table table the old table
+---@return table the new table
+local function ConvertProgressbar(table)
+    local newTable = {}
+    for k, v in pairs(table) do
+        if PROGconversion[k] then
+            newTable[PROGconversion[k]] = v
+        else
+            newTable[k] = v
+        end
+    end
+    return newTable
+end
+
+
 --- Notify the player
 ---@param text string The text to show
 ---@param type string The type of notification
 function Notify(text, type)
-    lib.notify({
-        title = 'Weed planting',
-        description = text,
-        type = type
-    })
+    if Shared.Notify == 'ox' then
+        lib.notify({
+            title = 'Weed planting',
+            description = text,
+            type = type
+        })
+        return
+    end
+
+    QBCore.Functions.Notify(text, type, 2500)
 end
+
 --- Check if the player is a police officer
 ---@return boolean True if the player is a police officer
 local function IsPolice()
