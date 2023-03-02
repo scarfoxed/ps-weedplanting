@@ -4,6 +4,8 @@ Script provides the convenience of planting weed anywhere using both male and fe
 
 For all support questions, ask in our [Discord](https://www.discord.gg/projectsloth) support chat. Do not create issues if you need help. Issues are for bug reporting and new features only.
 
+This version uses ox_lib for menu's notifications and it's cache function
+
 # Preview
 ![image](https://user-images.githubusercontent.com/82112471/221007957-34e1641e-1cc0-469a-8bf1-33315ef1bdf0.png)
 ![image](https://user-images.githubusercontent.com/82112471/221006801-4639fe6e-3a07-4d27-b0e1-90e1134829fd.png)

@@ -371,10 +371,12 @@ end)
 
 --- Callbacks
 
-QBCore.Functions.CreateCallback('ps-weedplanting:server:GetPlantData', function(source, cb, netId)
+
+
+lib.callback.register('ps-weedplanting:server:GetPlantData', function(source, netId)
     local entity = NetworkGetEntityFromNetworkId(netId)
-    if not WeedPlants[entity] then cb(nil) return end
-    local temp = {
+    if not WeedPlants[entity] then return nil end
+    return {
         id = WeedPlants[entity].id,
         coords = WeedPlants[entity].coords,
         time = WeedPlants[entity].time,
@@ -385,7 +387,6 @@ QBCore.Functions.CreateCallback('ps-weedplanting:server:GetPlantData', function(
         health = calcHealth(entity),
         growth = calcGrowth(entity)
     }
-    cb(temp)
 end)
 
 --- Items

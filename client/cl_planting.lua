@@ -2,15 +2,38 @@ QBCore = exports['qb-core']:GetCoreObject()
 PlayerJob = QBCore.Functions.GetPlayerData().job
 local seedUsed = false
 
---- Functions
+--- Classes
 
+---@class vector4
+---@field x number The X coords
+---@field y number The Y coords
+---@field z number The Z height
+---@field w number The heading
+
+---@class vector3
+---@field x number The X coords
+---@field y number The Y coords
+---@field z number The Z height
+
+---@class vector2
+---@field x number The X coords
+---@field y number The Y coords
+
+--- Turn rotation to direction
+---@param rot number the rotation number
+---@return vector3 the direction vector
 local RotationToDirection = function(rot)
     local rotZ = math.rad(rot.z)
     local rotX = math.rad(rot.x)
     local cosOfRotX = math.abs(math.cos(rotX))
     return vector3(-math.sin(rotZ) * cosOfRotX, math.cos(rotZ) * cosOfRotX, math.sin(rotX))
 end
-  
+
+-- Utils
+
+--- Raycast the camera
+---@param dist number Max distance for raycast
+---@return number, vector3, number, string The hit result, the end position, the entity hit, the surface normal 
 local RayCastCamera = function(dist)
     local camRot = GetGameplayCamRot()
     local camPos = GetGameplayCamCoord()
@@ -18,8 +41,26 @@ local RayCastCamera = function(dist)
     local dest = camPos + (dir * dist)
     local ray = StartShapeTestRay(camPos, dest, 17, -1, 0)
     local _, hit, endPos, surfaceNormal, entityHit = GetShapeTestResult(ray)
-    if hit == 0 then endPos = dest end
+    if hit == 0 then
+        endPos = dest
+    end
     return hit, endPos, entityHit, surfaceNormal
+end
+
+--- Notify the player
+---@param text string The text to show
+---@param type string The type of notification
+function Notify(text, type)
+    lib.notify({
+        title = 'Weed planting',
+        description = text,
+        type = type
+    })
+end
+--- Check if the player is a police officer
+---@return boolean True if the player is a police officer
+local function IsPolice()
+    return PlayerJob.type == 'leo' and PlayerJob.onduty
 end
 
 --- Player load, unload and update handlers
@@ -38,20 +79,223 @@ RegisterNetEvent('QBCore:Client:OnJobUpdate', function(JobInfo)
 end)
 
 AddEventHandler('onResourceStop', function(resource)
-    if resource ~= GetCurrentResourceName() then return end
+    if resource ~= GetCurrentResourceName() then
+        return
+    end
     clearWeedRun()
 end)
 
---- Events
+-- Functions for menus
 
+--- Clear a plant
+---@param entity number The entity to clear
+local function ClearPlant(entity)
+    local netId = NetworkGetNetworkIdFromEntity(entity)
+    TaskTurnPedToFaceEntity(cache.ped, entity, 1.0)
+    Wait(1500)
+
+    lib.requestAnimDict('amb@medic@standing@kneel@base')
+    lib.requestAnimDict('anim@gangops@facility@servers@bodysearch@')
+
+    TaskPlayAnim(cache.ped, 'amb@medic@standing@kneel@base', 'base', 8.0, 8.0, -1, 1, 0, false, false, false)
+    TaskPlayAnim(cache.ped, 'anim@gangops@facility@servers@bodysearch@', 'player_search', 8.0, 8.0, -1, 48, 0, false,
+        false, false)
+
+    QBCore.Functions.Progressbar('clear_plant', _U('clear_plant'), 8500, false, true, {
+        disableMovement = true,
+        disableCarMovement = true,
+        disableMouse = false,
+        disableCombat = true
+    }, {}, {}, {}, function()
+        TriggerServerEvent('ps-weedplanting:server:ClearPlant', netId)
+        ClearPedTasks(cache.ped)
+        RemoveAnimDict('amb@medic@standing@kneel@base')
+        RemoveAnimDict('anim@gangops@facility@servers@bodysearch@')
+    end, function()
+        Notify(_U('canceled'), 'error')
+        ClearPedTasks(cache.ped)
+        RemoveAnimDict('amb@medic@standing@kneel@base')
+        RemoveAnimDict('anim@gangops@facility@servers@bodysearch@')
+    end)
+end
+
+--- Harvest a plant
+---@param entity number The entity to plant
+local function HarvestPlant(entity)
+    local netId = NetworkGetNetworkIdFromEntity(entity)
+    TaskTurnPedToFaceEntity(cache.ped, entity, 1.0)
+    Wait(1500)
+
+    lib.requestAnimDict('amb@medic@standing@kneel@base')
+    lib.requestAnimDict('anim@gangops@facility@servers@bodysearch@')
+
+    TaskPlayAnim(cache.ped, 'amb@medic@standing@kneel@base', 'base', 8.0, 8.0, -1, 1, 0, false, false, false)
+    TaskPlayAnim(cache.ped, 'anim@gangops@facility@servers@bodysearch@', 'player_search', 8.0, 8.0, -1, 48, 0, false,
+        false, false)
+
+    QBCore.Functions.Progressbar('harvest_plant', _U('harvesting_plant'), 8500, false, true, {
+        disableMovement = true,
+        disableCarMovement = true,
+        disableMouse = false,
+        disableCombat = true
+    }, {}, {}, {}, function()
+        TriggerServerEvent('ps-weedplanting:server:HarvestPlant', netId)
+        ClearPedTasks(cache.ped)
+        RemoveAnimDict('amb@medic@standing@kneel@base')
+        RemoveAnimDict('anim@gangops@facility@servers@bodysearch@')
+    end, function()
+        Notify(_U('canceled'), 'error')
+        ClearPedTasks(cache.ped)
+        RemoveAnimDict('amb@medic@standing@kneel@base')
+        RemoveAnimDict('anim@gangops@facility@servers@bodysearch@')
+    end)
+end
+
+---Destroy a seed
+---@param entity number The entity to destroy
+local function PoliceDestroy(entity)
+    local netId = NetworkGetNetworkIdFromEntity(entity)
+    TaskTurnPedToFaceEntity(cache.ped, entity, 1.0)
+    Wait(500)
+    ClearPedTasks(cache.ped)
+    TriggerServerEvent('ps-weedplanting:server:PoliceDestroy', netId)
+end
+
+--- Give water to a plant
+---@param entity number The entity to give water to
+local function GiveWater(entity)
+    if QBCore.Functions.HasItem(Shared.WaterItem, 1) then
+        local netId = NetworkGetNetworkIdFromEntity(entity)
+        local coords = GetEntityCoords(cache.ped)
+
+        local model = joaat('prop_wateringcan')
+
+        TaskTurnPedToFaceEntity(cache.ped, entity, 1.0)
+        Wait(1500)
+
+        lib.requestModel(model)
+        lib.requestNamedPtfxAsset('core')
+
+        SetPtfxAssetNextCall('core')
+        local created_object = CreateObject(model, coords.x, coords.y, coords.z, true, true, true)
+        AttachEntityToEntity(created_object, cache.ped, GetPedBoneIndex(cache.ped, 28422), 0.4, 0.1, 0.0, 90.0, 180.0,
+            0.0, true, true, false, true, 1, true)
+        local effect = StartParticleFxLoopedOnEntity('ent_sht_water', created_object, 0.35, 0.0, 0.25, 0.0, 0.0, 0.0,
+            2.0, false, false, false)
+        QBCore.Functions.Progressbar('weedplanting_water', _U('watering_plant'), 6000, false, false, {
+            disableMovement = true,
+            disableCarMovement = true,
+            disableMouse = false,
+            disableCombat = true
+        }, {
+            animDict = 'weapon@w_sp_jerrycan',
+            anim = 'fire',
+            flags = 1
+        }, {}, {}, function()
+            TriggerServerEvent('ps-weedplanting:server:GiveWater', netId)
+            ClearPedTasks(cache.ped)
+            DeleteEntity(created_object)
+            StopParticleFxLooped(effect, 0)
+        end, function()
+            ClearPedTasks(cache.ped)
+            DeleteEntity(created_object)
+            StopParticleFxLooped(effect, 0)
+            Notify(_U('canceled'), 'error')
+        end)
+    else
+        Notify(_U('missing_water'), 'error')
+    end
+end
+
+--- Give fertilizer to a plant
+---@param entity number The entity to give fertilizer to
+local function GiveFertilizer(entity)
+    if QBCore.Functions.HasItem(Shared.FertilizerItem, 1) then
+        local netId = NetworkGetNetworkIdFromEntity(entity)
+        local coords = GetEntityCoords(cache.ped)
+        local model = joaat('w_am_jerrycan_sf')
+        TaskTurnPedToFaceEntity(cache.ped, entity, 1.0)
+        Wait(1500)
+
+        lib.requestModel(model)
+
+        local created_object = CreateObject(model, coords.x, coords.y, coords.z, true, true, true)
+        AttachEntityToEntity(created_object, cache.ped, GetPedBoneIndex(cache.ped, 28422), 0.3, 0.1, 0.0, 90.0, 180.0,
+            0.0, true, true, false, true, 1, true)
+        QBCore.Functions.Progressbar('weedplanting_fertilizer', _U('fertilizing_plant'), 6000, false, false, {
+            disableMovement = true,
+            disableCarMovement = true,
+            disableMouse = false,
+            disableCombat = true
+        }, {
+            animDict = 'weapon@w_sp_jerrycan',
+            anim = 'fire',
+            flags = 1
+        }, {}, {}, function()
+            TriggerServerEvent('ps-weedplanting:server:GiveFertilizer', netId)
+            ClearPedTasks(cache.ped)
+            DeleteEntity(created_object)
+        end, function()
+            ClearPedTasks(cache.ped)
+            DeleteEntity(created_object)
+            Notify(_U('canceled'), 'error')
+        end)
+    else
+        Notify(_U('missing_fertilizer'), 'error')
+    end
+end
+
+---Add male seed to a plant
+---@param entity number The entity to add the seed to
+local function AddMaleSeed(entity)
+    if QBCore.Functions.HasItem(Shared.MaleSeed, 1) then
+        local netId = NetworkGetNetworkIdFromEntity(entity)
+        TaskTurnPedToFaceEntity(cache.ped, entity, 1.0)
+        Wait(1500)
+
+        lib.requestAnimDict('amb@medic@standing@kneel@base')
+        lib.requestAnimDict('anim@gangops@facility@servers@bodysearch@')
+
+        TaskPlayAnim(cache.ped, 'amb@medic@standing@kneel@base', 'base', 8.0, 8.0, -1, 1, 0, false, false, false)
+        TaskPlayAnim(cache.ped, 'anim@gangops@facility@servers@bodysearch@', 'player_search', 8.0, 8.0, -1, 48, 0,
+            false, false, false)
+
+        QBCore.Functions.Progressbar('add_maleseed', _U('adding_male_seed'), 8500, false, true, {
+            disableMovement = true,
+            disableCarMovement = true,
+            disableMouse = false,
+            disableCombat = true
+        }, {}, {}, {}, function()
+            TriggerServerEvent('ps-weedplanting:server:AddMaleSeed', netId)
+            ClearPedTasks(cache.ped)
+            RemoveAnimDict('amb@medic@standing@kneel@base')
+            RemoveAnimDict('anim@gangops@facility@servers@bodysearch@')
+        end, function()
+            Notify(_U('canceled'), 'error')
+            ClearPedTasks(cache.ped)
+            RemoveAnimDict('amb@medic@standing@kneel@base')
+            RemoveAnimDict('anim@gangops@facility@servers@bodysearch@')
+        end)
+    else
+        Notify(_U('missing_mseed'), 'error')
+    end
+end
+
+--- Events
 RegisterNetEvent('ps-weedplanting:client:UseWeedSeed', function()
-    if GetVehiclePedIsIn(PlayerPedId(), false) ~= 0 then return end
-    if seedUsed then return end
+    if cache.vehicle then
+        return
+    end
+    if seedUsed then
+        return
+    end
     seedUsed = true
     local ModelHash = Shared.WeedProps[1]
-    RequestModel(ModelHash)
-    while not HasModelLoaded(ModelHash) do Wait(0) end
-    exports['qb-core']:DrawText(_U('place_or_cancel'), 'left')
+
+    lib.requestModel(ModelHash)
+
+    lib.showTextUI(_U('place_or_cancel'))
+
     local hit, dest, _, _ = RayCastCamera(Shared.rayCastingDistance)
     local plant = CreateObject(ModelHash, dest.x, dest.y, dest.z + Shared.ObjectZOffset, false, false, false)
     SetEntityCollision(plant, false, false)
@@ -67,44 +311,40 @@ RegisterNetEvent('ps-weedplanting:client:UseWeedSeed', function()
             -- [E] To spawn plant
             if IsControlJustPressed(0, 38) then
                 planted = true
-                exports['qb-core']:KeyPressed(38)
+                lib.hideTextUI()
                 DeleteObject(plant)
-                local ped = PlayerPedId()
-                RequestAnimDict('amb@medic@standing@kneel@base')
-                RequestAnimDict('anim@gangops@facility@servers@bodysearch@')
-                while 
-                    not HasAnimDictLoaded('amb@medic@standing@kneel@base') or
-                    not HasAnimDictLoaded('anim@gangops@facility@servers@bodysearch@')
-                do 
-                    Wait(0) 
-                end
-                TaskPlayAnim(ped, 'amb@medic@standing@kneel@base', 'base', 8.0, 8.0, -1, 1, 0, false, false, false)
-                TaskPlayAnim(ped, 'anim@gangops@facility@servers@bodysearch@', 'player_search', 8.0, 8.0, -1, 48, 0, false, false, false)
+
+                lib.requestAnimDict('amb@medic@standing@kneel@base')
+                lib.requestAnimDict('anim@gangops@facility@servers@bodysearch@')
+
+                TaskPlayAnim(cache.ped, 'amb@medic@standing@kneel@base', 'base', 8.0, 8.0, -1, 1, 0, false, false, false)
+                TaskPlayAnim(cache.ped, 'anim@gangops@facility@servers@bodysearch@', 'player_search', 8.0, 8.0, -1, 48,
+                    0, false, false, false)
                 QBCore.Functions.Progressbar('spawn_plant', _U('place_sapling'), 2000, false, true, {
                     disableMovement = true,
                     disableCarMovement = false,
                     disableMouse = false,
-                    disableCombat = true,
-                }, {}, {}, {}, function() 
+                    disableCombat = true
+                }, {}, {}, {}, function()
                     TriggerServerEvent('ps-weedplanting:server:CreateNewPlant', dest)
                     planted = false
                     seedUsed = false
-                    ClearPedTasks(ped)
+                    ClearPedTasks(cache.ped)
                     RemoveAnimDict('amb@medic@standing@kneel@base')
                     RemoveAnimDict('anim@gangops@facility@servers@bodysearch@')
-                end, function() 
-                    QBCore.Functions.Notify(_U('canceled'), 'error', 2500)
+                end, function()
+                    Notify(_U('canceled'), 'error')
                     planted = false
                     seedUsed = false
-                    ClearPedTasks(ped)
+                    ClearPedTasks(cache.ped)
                     RemoveAnimDict('amb@medic@standing@kneel@base')
                     RemoveAnimDict('anim@gangops@facility@servers@bodysearch@')
                 end)
             end
-            
+
             -- [G] to cancel
             if IsControlJustPressed(0, 47) then
-                exports['qb-core']:KeyPressed(47)
+                lib.hideTextUI()
                 planted = false
                 seedUsed = false
                 DeleteObject(plant)
@@ -116,442 +356,191 @@ end)
 
 RegisterNetEvent('ps-weedplanting:client:CheckPlant', function(data)
     local netId = NetworkGetNetworkIdFromEntity(data.entity)
-    QBCore.Functions.TriggerCallback('ps-weedplanting:server:GetPlantData', function(result)
-        if not result then return end
+    lib.callback('ps-weedplanting:server:GetPlantData', false, function(result)
+        if not result then
+            return
+        end
         if result.health == 0 then -- Destroy plant
-            exports['qb-menu']:openMenu({
-                {
-                    header = _U('plant_header'),
-                    txt = _U('esc_to_close'),
-                    icon = 'fas fa-chevron-left',
-                    params = {
-                        event = 'qb-menu:closeMenu'
-                    }
-                },
-                {
-                    header = _U('clear_plant_header'),
-                    txt = _U('clear_plant_text'),
-                    icon = 'fas fa-skull-crossbones',
-                    params = {
-                        event = 'ps-weedplanting:client:ClearPlant',
-                        args = data.entity
-                    }
-                }
+            lib.registerContext({
+                id = 'destroy_plant_menu',
+                title = _U('destroy_plant'),
+                options = {{
+                    title = _U('clear_plant_header'),
+                    description = _U('clear_plant_text'),
+                    icon = 'skull-crossbones',
+                    onSelect = function()
+                        ClearPlant(data.entity)
+                    end
+                }}
             })
+            lib.showContext('destroy_plant_menu')
         elseif result.growth == 100 then -- Harvest
-            if PlayerJob.type == 'leo' and PlayerJob.onduty then
-                exports['qb-menu']:openMenu({
-                    {
-                        header = _U('plant_header'),
-                        txt = _U('esc_to_close'),
-                        icon = 'fas fa-chevron-left',
-                        params = {
-                            event = 'qb-menu:closeMenu'
-                        }
-                    },
-                    {
-                        header = 'Stage: ' .. result.stage .. ' - Health: ' .. result.health,
-                        txt = _U('ready_for_harvest'),
-                        icon = 'fas fa-scissors',
-                        params = {
-                            event = 'ps-weedplanting:client:HarvestPlant',
-                            args = data.entity
-                        }
-                    },
-                    {
-                        header = _U('destroy_plant'),
-                        txt = _U('ready_for_harvest'),
-                        icon = 'fas fa-fire',
-                        params = {
-                            event = 'ps-weedplanting:client:PoliceDestroy',
-                            args = data.entity
-                        }
-                    }
+            if IsPolice() then
+                lib.registerContext({
+                    id = 'police_plant',
+                    title = _U('plant_header'),
+                    options = {{
+                        title = 'Stage: ' .. result.stage .. ' - Health: ' .. result.health,
+                        description = _U('ready_for_harvest'),
+                        icon = 'scissors',
+                        onSelect = function()
+                            HarvestPlant(data.entity)
+                        end
+                    }, {
+                        title = _U('destroy_plant'),
+                        description = _U('ready_for_harvest'),
+                        icon = 'fire',
+                        onSelect = function()
+                            PoliceDestroy(data.entity)
+                        end
+                    }}
                 })
+                lib.showContext('police_plant')
             else
-                exports['qb-menu']:openMenu({
-                    {
-                        header = _U('plant_header'),
-                        txt = _U('esc_to_close'),
-                        icon = 'fas fa-chevron-left',
-                        params = {
-                            event = 'qb-menu:closeMenu'
-                        }
-                    },
-                    {
-                        header = 'Stage: ' .. result.stage .. ' - Health: ' .. result.health,
-                        txt = _U('ready_for_harvest'),
-                        icon = 'fas fa-scissors',
-                        params = {
-                            event = 'ps-weedplanting:client:HarvestPlant',
-                            args = data.entity
-                        }
-                    },
+                lib.registerContext({
+                    id = 'player_plant',
+                    title = _U('plant_header'),
+                    options = {{
+                        title = 'Stage: ' .. result.stage .. ' - Health: ' .. result.health,
+                        description = _U('ready_for_harvest'),
+                        icon = 'scissors',
+                        onSelect = function()
+                            HarvestPlant(data.entity)
+                        end
+                    }}
                 })
+                lib.showContext('player_plant')
             end
         elseif result.gender == 'female' then -- Option to add male seed
-            if PlayerJob.type == 'leo' and PlayerJob.onduty then
-                exports['qb-menu']:openMenu({
-                    {
-                        header = _U('plant_header'),
-                        txt = _U('esc_to_close'),
-                        icon = 'fas fa-chevron-left',
-                        params = {
-                            event = 'qb-menu:closeMenu'
-                        }
-                    },
-                    {
-                        header = 'Growth: ' .. result.growth .. '%' .. ' - Stage: ' .. result.stage,
-                        txt = 'Health: ' .. result.health,
-                        icon = 'fas fa-chart-simple',
-                        isMenuHeader = true
-                    },
-                    {
-                        header = _U('destroy_plant'),
-                        txt = _U('ready_for_harvest'),
-                        icon = 'fas fa-fire',
-                        params = {
-                            event = 'ps-weedplanting:client:PoliceDestroy',
-                            args = data.entity
-                        }
-                    }
+            if IsPolice() then
+                lib.registerContext({
+                    id = 'police_plant',
+                    title = _U('plant_header'),
+                    options = {{
+                        title = 'Growth: ' .. result.growth .. '%' .. ' - Stage: ' .. result.stage,
+                        description = 'Health: ' .. result.health,
+                        icon = 'chart-simple'
+                    }, {
+                        title = _U('destroy_plant'),
+                        description = _U('ready_for_harvest'),
+                        icon = 'fire',
+                        onSelect = function()
+                            PoliceDestroy(data.entity)
+                        end
+                    }}
                 })
+                lib.showContext('police_plant')
             else
-                exports['qb-menu']:openMenu({
-                    {
-                        header = _U('plant_header'),
-                        txt = _U('esc_to_close'),
-                        icon = 'fas fa-chevron-left',
-                        params = {
-                            event = 'qb-menu:closeMenu'
-                        }
-                    },
-                    {
-                        header = 'Growth: ' .. result.growth .. '%' .. ' - Stage: ' .. result.stage,
-                        txt = 'Health: ' .. result.health,
-                        icon = 'fas fa-chart-simple',
-                        isMenuHeader = true
-                    },
-                    {
-                        header = 'Water: ' .. result.water .. '%',
-                        txt = _U('add_water'),
-                        icon = 'fas fa-shower',
-                        params = {
-                            event = 'ps-weedplanting:client:GiveWater',
-                            args = data.entity
-                        }
-                    },
-                    {
-                        header = 'Fertilizer: ' .. result.fertilizer .. '%',
-                        txt = _U('add_fertilizer'),
-                        icon = 'fab fa-nutritionix',
-                        params = {
-                            args = data.entity,
-                            event = 'ps-weedplanting:client:GiveFertilizer',
-                        }
-                    },
-                    {
-                        header = 'Gender: ' .. result.gender,
-                        txt = _U('add_mseed'),
-                        icon = 'fas fa-venus',
-                        params = {
-                            args = data.entity,
-                            event = 'ps-weedplanting:client:AddMaleSeed',
-                        }
-                    }
+                lib.registerContext({
+                    id = 'player_plant',
+                    title = _U('plant_header'),
+                    options = {{
+                        title = 'Growth: ' .. result.growth .. '%' .. ' - Stage: ' .. result.stage,
+                        description = 'Health: ' .. result.health,
+                        icon = 'chart-simple'
+                    }, {
+                        title = 'Water: ' .. result.water .. '%',
+                        description = _U('add_water'),
+                        icon = 'shower',
+                        onSelect = function()
+                            GiveWater(data.entity)
+                        end
+                    }, {
+                        title = 'Fertilizer: ' .. result.fertilizer .. '%',
+                        description = _U('add_fertilizer'),
+                        icon = 'seedling',
+                        onSelect = function()
+                            GiveFertilizer(data.entity)
+                        end
+                    }, {
+                        title = 'Gender: ' .. result.gender,
+                        description = _U('add_mseed'),
+                        icon = 'venus',
+                        onSelect = function()
+                            AddMaleSeed(data.entity)
+                        end
+                    }}
                 })
+                lib.showContext('player_plant')
             end
         else -- No option to add male seed
-            if PlayerJob.type == 'leo' and PlayerJob.onduty then
-                exports['qb-menu']:openMenu({
-                    {
-                        header = _U('plant_header'),
-                        txt = _U('esc_to_close'),
-                        icon = 'fas fa-chevron-left',
-                        params = {
-                            event = 'qb-menu:closeMenu'
-                        }
-                    },
-                    {
-                        header = 'Growth: ' .. result.growth .. '%' .. ' - Stage: ' .. result.stage,
-                        txt = 'Health: ' .. result.health,
-                        icon = 'fas fa-chart-simple',
-                        isMenuHeader = true
-                    },
-                    {
-                        header = _U('destroy_plant'),
-                        txt = _U('ready_for_harvest'),
-                        icon = 'fas fa-fire',
-                        params = {
-                            event = 'ps-weedplanting:client:PoliceDestroy',
-                            args = data.entity
-                        }
-                    },
+            if IsPolice() then
+                lib.registerContext({
+                    id = 'police_plant',
+                    title = _U('plant_header'),
+                    options = {{
+                        title = 'Growth: ' .. result.growth .. '%' .. ' - Stage: ' .. result.stage,
+                        description = 'Health: ' .. result.health,
+                        icon = 'chart-simple'
+                    }, {
+                        title = _U('destroy_plant'),
+                        description = _U('ready_for_harvest'),
+                        icon = 'fire',
+                        onSelect = function()
+                            PoliceDestroy(data.entity)
+                        end
+                    }}
                 })
+                lib.showContext('police_plant')
             else
-                exports['qb-menu']:openMenu({
-                    {
-                        header = _U('plant_header'),
-                        txt = _U('esc_to_close'),
-                        icon = 'fas fa-chevron-left',
-                        params = {
-                            event = 'qb-menu:closeMenu'
-                        }
-                    },
-                    {
-                        header = 'Growth: ' .. result.growth .. '%' .. ' - Stage: ' .. result.stage,
-                        txt = 'Health: ' .. result.health,
-                        icon = 'fas fa-chart-simple',
-                        isMenuHeader = true
-                    },
-                    {
-                        header = 'Water: ' .. result.water .. '%',
-                        txt = _U('add_water'),
-                        icon = 'fas fa-shower',
-                        params = {
-                            event = 'ps-weedplanting:client:GiveWater',
-                            args = data.entity
-                        }
-                    },
-                    {
-                        header = 'Fertilizer: ' .. result.fertilizer .. '%',
-                        txt = _U('add_water'),
-                        icon = 'fab fa-nutritionix',
-                        params = {
-                            args = data.entity,
-                            event = 'ps-weedplanting:client:GiveFertilizer',
-                        }
-                    },
-                    {
-                        header = 'Gender: ' .. result.gender,
-                        txt = _U('add_mseed'),
-                        icon = 'fas fa-mars',
-                        isMenuHeader = true
-                    }
+                lib.registerContext({
+                    id = 'player_plant',
+                    title = _U('plant_header'),
+                    options = {{
+                        title = 'Growth: ' .. result.growth .. '%' .. ' - Stage: ' .. result.stage,
+                        description = 'Health: ' .. result.health,
+                        icon = 'chart-simple'
+                    }, {
+                        title = 'Water: ' .. result.water .. '%',
+                        description = _U('add_water'),
+                        icon = 'shower',
+                        onSelect = function()
+                            GiveWater(data.entity)
+                        end
+                    }, {
+                        title = 'Fertilizer: ' .. result.fertilizer .. '%',
+                        description = _U('add_fertilizer'),
+                        icon = 'seedling',
+                        onSelect = function()
+                            GiveFertilizer(data.entity)
+                        end
+                    }, {
+                        title = 'Gender: ' .. result.gender,
+                        description = _U('add_mseed'),
+                        icon = 'mars'
+                    }}
                 })
+                lib.showContext('player_plant')
             end
         end
     end, netId)
 end)
 
-RegisterNetEvent('ps-weedplanting:client:ClearPlant', function(entity)
-    local netId = NetworkGetNetworkIdFromEntity(entity)
-    local ped = PlayerPedId()
-    TaskTurnPedToFaceEntity(ped, entity, 1.0)
-    Wait(1500)
-
-    RequestAnimDict('amb@medic@standing@kneel@base')
-    RequestAnimDict('anim@gangops@facility@servers@bodysearch@')
-    while 
-        not HasAnimDictLoaded('amb@medic@standing@kneel@base') or
-        not HasAnimDictLoaded('anim@gangops@facility@servers@bodysearch@')
-    do 
-        Wait(0) 
-    end
-    TaskPlayAnim(ped, 'amb@medic@standing@kneel@base', 'base', 8.0, 8.0, -1, 1, 0, false, false, false)
-    TaskPlayAnim(ped, 'anim@gangops@facility@servers@bodysearch@', 'player_search', 8.0, 8.0, -1, 48, 0, false, false, false)
-
-    QBCore.Functions.Progressbar('clear_plant', _U('clear_plant'), 8500, false, true, {
-        disableMovement = true,
-        disableCarMovement = true,
-        disableMouse = false,
-        disableCombat = true,
-    }, {}, {}, {}, function()
-        TriggerServerEvent('ps-weedplanting:server:ClearPlant', netId)
-        ClearPedTasks(ped)
-        RemoveAnimDict('amb@medic@standing@kneel@base')
-        RemoveAnimDict('anim@gangops@facility@servers@bodysearch@')
-    end, function()
-        QBCore.Functions.Notify(_U('canceled'), 'error', 2500)
-        ClearPedTasks(ped)
-        RemoveAnimDict('amb@medic@standing@kneel@base')
-        RemoveAnimDict('anim@gangops@facility@servers@bodysearch@')
-    end)
-end)
-
-RegisterNetEvent('ps-weedplanting:client:HarvestPlant', function(entity)
-    local netId = NetworkGetNetworkIdFromEntity(entity)
-    local ped = PlayerPedId()
-    TaskTurnPedToFaceEntity(ped, entity, 1.0)
-    Wait(1500)
-
-    RequestAnimDict('amb@medic@standing@kneel@base')
-    RequestAnimDict('anim@gangops@facility@servers@bodysearch@')
-    while 
-        not HasAnimDictLoaded('amb@medic@standing@kneel@base') or
-        not HasAnimDictLoaded('anim@gangops@facility@servers@bodysearch@')
-    do 
-        Wait(0) 
-    end
-    TaskPlayAnim(ped, 'amb@medic@standing@kneel@base', 'base', 8.0, 8.0, -1, 1, 0, false, false, false)
-    TaskPlayAnim(ped, 'anim@gangops@facility@servers@bodysearch@', 'player_search', 8.0, 8.0, -1, 48, 0, false, false, false)
-
-    QBCore.Functions.Progressbar('harvest_plant', _U('harvesting_plant'), 8500, false, true, {
-        disableMovement = true, 
-        disableCarMovement = true,
-        disableMouse = false,
-        disableCombat = true,
-    }, {}, {}, {}, function()
-        TriggerServerEvent('ps-weedplanting:server:HarvestPlant', netId)
-        ClearPedTasks(ped)
-        RemoveAnimDict('amb@medic@standing@kneel@base')
-        RemoveAnimDict('anim@gangops@facility@servers@bodysearch@')
-    end, function()
-        QBCore.Functions.Notify(_U('canceled'), 'error', 2500)
-        ClearPedTasks(ped)
-        RemoveAnimDict('amb@medic@standing@kneel@base')
-        RemoveAnimDict('anim@gangops@facility@servers@bodysearch@')
-    end)
-end)
-
-RegisterNetEvent('ps-weedplanting:client:PoliceDestroy', function(entity)
-    local netId = NetworkGetNetworkIdFromEntity(entity)
-    local ped = PlayerPedId()
-    TaskTurnPedToFaceEntity(ped, entity, 1.0)
-    Wait(500)
-    ClearPedTasks(ped)
-    TriggerServerEvent('ps-weedplanting:server:PoliceDestroy', netId)
-end)
-
 RegisterNetEvent('ps-weedplanting:client:FireGoBrrrrrrr', function(coords)
-    local ped = PlayerPedId()
-    local pedCoords = GetEntityCoords(ped)
-    if #(pedCoords - vector3(coords.x, coords.y, coords.z)) > 300 then return end
+    local pedCoords = GetEntityCoords(cache.ped)
+    if #(pedCoords - vector3(coords.x, coords.y, coords.z)) > 300 then
+        return
+    end
 
-    RequestNamedPtfxAsset('core')
-    while not HasNamedPtfxAssetLoaded('core') do Wait(0) end
+    lib.requestNamedPtfxAsset('core')
+
     SetPtfxAssetNextCall('core')
-    local effect = StartParticleFxLoopedAtCoord('ent_ray_paleto_gas_flames', coords.x, coords.y, coords.z + 0.5, 0.0, 0.0, 0.0, 0.6, false, false, false, false)
+    local effect = StartParticleFxLoopedAtCoord('ent_ray_paleto_gas_flames', coords.x, coords.y, coords.z + 0.5, 0.0,
+        0.0, 0.0, 0.6, false, false, false, false)
     Wait(Shared.FireTime)
     StopParticleFxLooped(effect, 0)
-end)
-
-RegisterNetEvent('ps-weedplanting:client:GiveWater', function(entity)
-    if QBCore.Functions.HasItem(Shared.WaterItem, 1) then
-        local netId = NetworkGetNetworkIdFromEntity(entity)
-        local ped = PlayerPedId()
-        local coords = GetEntityCoords(ped)
-        local model = `prop_wateringcan`
-        TaskTurnPedToFaceEntity(ped, entity, 1.0)
-        Wait(1500)
-        RequestModel(model)
-        RequestNamedPtfxAsset('core')
-        while not HasModelLoaded(model) or not HasNamedPtfxAssetLoaded('core') do Wait(0) end
-        SetPtfxAssetNextCall('core')
-        local created_object = CreateObject(model, coords.x, coords.y, coords.z, true, true, true)
-        AttachEntityToEntity(created_object, ped, GetPedBoneIndex(ped, 28422), 0.4, 0.1, 0.0, 90.0, 180.0, 0.0, true, true, false, true, 1, true)
-        local effect = StartParticleFxLoopedOnEntity('ent_sht_water', created_object, 0.35, 0.0, 0.25, 0.0, 0.0, 0.0, 2.0, false, false, false)
-        QBCore.Functions.Progressbar('weedplanting_water', _U('watering_plant'), 6000, false, false, {
-            disableMovement = true,
-            disableCarMovement = true,
-            disableMouse = false,
-            disableCombat = true,
-        }, {
-            animDict = 'weapon@w_sp_jerrycan',
-            anim = 'fire',
-            flags = 1,
-        }, {}, {}, function()
-            TriggerServerEvent('ps-weedplanting:server:GiveWater', netId)
-            ClearPedTasks(ped)
-            DeleteEntity(created_object)
-            StopParticleFxLooped(effect, 0)
-        end, function()
-            ClearPedTasks(ped)
-            DeleteEntity(created_object)
-            StopParticleFxLooped(effect, 0)
-            QBCore.Functions.Notify(_U('canceled'), 'error', 2500)
-        end)
-    else
-        QBCore.Functions.Notify(_U('missing_water'), 'error', 2500)
-    end
-end)
-
-RegisterNetEvent('ps-weedplanting:client:GiveFertilizer', function(entity)
-    if QBCore.Functions.HasItem(Shared.FertilizerItem, 1) then
-        local netId = NetworkGetNetworkIdFromEntity(entity)
-        local ped = PlayerPedId()
-        local coords = GetEntityCoords(ped)
-        local model = `w_am_jerrycan_sf`
-        TaskTurnPedToFaceEntity(ped, entity, 1.0)
-        Wait(1500)
-        RequestModel(model)
-        while not HasModelLoaded(model) do Wait(0) end
-        local created_object = CreateObject(model, coords.x, coords.y, coords.z, true, true, true)
-        AttachEntityToEntity(created_object, ped, GetPedBoneIndex(ped, 28422), 0.3, 0.1, 0.0, 90.0, 180.0, 0.0, true, true, false, true, 1, true)
-        QBCore.Functions.Progressbar('weedplanting_fertilizer', _U('fertilizing_plant'), 6000, false, false, {
-            disableMovement = true,
-            disableCarMovement = true,
-            disableMouse = false,
-            disableCombat = true,
-        }, {
-            animDict = 'weapon@w_sp_jerrycan',
-            anim = 'fire',
-            flags = 1,
-        }, {}, {}, function()
-            TriggerServerEvent('ps-weedplanting:server:GiveFertilizer', netId)
-            ClearPedTasks(ped)
-            DeleteEntity(created_object)
-        end, function()
-            ClearPedTasks(ped)
-            DeleteEntity(created_object)
-            QBCore.Functions.Notify(_U('canceled'), 'error', 2500)
-        end)
-    else
-        QBCore.Functions.Notify(_U('missing_fertilizer'), 'error', 2500)
-    end
-end)
-
-RegisterNetEvent('ps-weedplanting:client:AddMaleSeed', function(entity)
-    if QBCore.Functions.HasItem(Shared.MaleSeed, 1) then
-        local netId = NetworkGetNetworkIdFromEntity(entity)
-        local ped = PlayerPedId()
-        TaskTurnPedToFaceEntity(ped, entity, 1.0)
-        Wait(1500)
-
-        RequestAnimDict('amb@medic@standing@kneel@base')
-        RequestAnimDict('anim@gangops@facility@servers@bodysearch@')
-        while 
-            not HasAnimDictLoaded('amb@medic@standing@kneel@base') or
-            not HasAnimDictLoaded('anim@gangops@facility@servers@bodysearch@')
-        do 
-            Wait(0) 
-        end
-        TaskPlayAnim(ped, 'amb@medic@standing@kneel@base', 'base', 8.0, 8.0, -1, 1, 0, false, false, false)
-        TaskPlayAnim(ped, 'anim@gangops@facility@servers@bodysearch@', 'player_search', 8.0, 8.0, -1, 48, 0, false, false, false)
-
-        QBCore.Functions.Progressbar('add_maleseed', _U('adding_male_seed'), 8500, false, true, {
-            disableMovement = true,
-            disableCarMovement = true,
-            disableMouse = false,
-            disableCombat = true,
-        }, {}, {}, {}, function()
-            TriggerServerEvent('ps-weedplanting:server:AddMaleSeed', netId)
-            ClearPedTasks(ped)
-            RemoveAnimDict('amb@medic@standing@kneel@base')
-            RemoveAnimDict('anim@gangops@facility@servers@bodysearch@')
-        end, function()
-            QBCore.Functions.Notify(_U('canceled'), 'error', 2500)
-            ClearPedTasks(ped)
-            RemoveAnimDict('amb@medic@standing@kneel@base')
-            RemoveAnimDict('anim@gangops@facility@servers@bodysearch@')
-        end)
-    else
-        QBCore.Functions.Notify(_U('missing_mseed'), 'error', 2500)
-    end
 end)
 
 --- Threads
 
 CreateThread(function()
     exports['qb-target']:AddTargetModel(Shared.WeedProps, {
-        options = {
-            {
-                type = 'client',
-                event = 'ps-weedplanting:client:CheckPlant',
-                icon = 'fas fa-cannabis',
-                label = _U('check_plant')
-            }
-        },
-        distance = 1.5, 
+        options = {{
+            type = 'client',
+            event = 'ps-weedplanting:client:CheckPlant',
+            icon = 'fas fa-cannabis',
+            label = _U('check_plant')
+        }},
+        distance = 1.5
     })
 end)

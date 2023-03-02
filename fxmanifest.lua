@@ -7,6 +7,7 @@ description 'Project Sloth Weedplanting script'
 author 'Lionh34rt'
 
 shared_scripts {
+    '@ox_lib/init.lua',
     'shared/sh_shared.lua',
     'shared/locales.lua',
 }
