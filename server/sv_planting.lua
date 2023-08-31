@@ -287,9 +287,8 @@ RegisterNetEvent('ps-weedplanting:server:GiveWater', function(netId)
     if not Player then return end
     if #(GetEntityCoords(GetPlayerPed(src)) - WeedPlants[entity].coords) > 10 then return end
 
-    if Player.Functions.RemoveItem(Shared.WaterItem, 1, false) then
-        TriggerClientEvent('inventory:client:ItemBox', src, QBCore.Shared.Items[Shared.WaterItem], 'remove', 1)
-        TriggerClientEvent('QBCore:Notify', src, _U('watered_plant'), 'success', 2500)
+    if exports.ox_inventory:RemoveItem(src, Shared.FullCanItem, 1) then
+        lib.notify(src, {description = 'Plant Watered', type = 'success'})
         
         WeedPlants[entity].water[#WeedPlants[entity].water + 1] = os.time()
         MySQL.update('UPDATE weedplants SET water = (:water) WHERE id = (:id)', {
@@ -306,10 +305,8 @@ RegisterNetEvent('ps-weedplanting:server:GiveFertilizer', function(netId)
     local Player = QBCore.Functions.GetPlayer(src)
     if not Player then return end
     if #(GetEntityCoords(GetPlayerPed(src)) - WeedPlants[entity].coords) > 10 then return end
-
-    if Player.Functions.RemoveItem(Shared.FertilizerItem, 1, false) then
-        TriggerClientEvent('inventory:client:ItemBox', src, QBCore.Shared.Items[Shared.FertilizerItem], 'remove', 1)
-        TriggerClientEvent('QBCore:Notify', src, _U('fertilizer_added'), 'success', 2500)
+    if exports.ox_inventory:RemoveItem(src, Shared.FertilizerItem, 1) then
+        lib.notify(src, {description = 'Fertilizer Added', type = 'success'})
         
         WeedPlants[entity].fertilizer[#WeedPlants[entity].fertilizer + 1] = os.time()
         MySQL.update('UPDATE weedplants SET fertilizer = (:fertilizer) WHERE id = (:id)', {
@@ -326,11 +323,9 @@ RegisterNetEvent('ps-weedplanting:server:AddMaleSeed', function(netId)
     local Player = QBCore.Functions.GetPlayer(src)
     if not Player then return end
     if #(GetEntityCoords(GetPlayerPed(src)) - WeedPlants[entity].coords) > 10 then return end
-
-    if Player.Functions.RemoveItem(Shared.MaleSeed, 1, false) then
-        TriggerClientEvent('inventory:client:ItemBox', src, QBCore.Shared.Items[Shared.MaleSeed], 'remove', 1)
-        TriggerClientEvent('QBCore:Notify', src, _U('male_seed_added'), 'success', 2500)
-        
+    if exports.ox_inventory:RemoveItem(src, Shared.MaleSeed, 1) then
+        lib.notify(src, {description = 'Male Seed Added', type = 'success'})
+       
         WeedPlants[entity].gender = 'male'
         MySQL.update('UPDATE weedplants SET gender = (:gender) WHERE id = (:id)', {
             ['gender'] = WeedPlants[entity].gender,
@@ -344,8 +339,7 @@ RegisterNetEvent('ps-weedplanting:server:CreateNewPlant', function(coords)
     local Player = QBCore.Functions.GetPlayer(src)
     if not Player then return end
     if #(GetEntityCoords(GetPlayerPed(src)) - coords) > Shared.rayCastingDistance + 10 then return end
-    if Player.Functions.RemoveItem(Shared.FemaleSeed, 1) then
-        TriggerClientEvent('inventory:client:ItemBox', src, QBCore.Shared.Items[Shared.FemaleSeed], 'remove', 1)
+    if exports.ox_inventory:RemoveItem(src, Shared.FemaleSeed, 1) and exports.ox_inventory:RemoveItem(src, Shared.PlantTubItem, 1) then
         local ModelHash = Shared.WeedProps[1]
         local plant = CreateObjectNoOffset(ModelHash, coords.x, coords.y, coords.z + Shared.ObjectZOffset, true, true, false)
         FreezeEntityPosition(plant, true)
@@ -369,14 +363,22 @@ RegisterNetEvent('ps-weedplanting:server:CreateNewPlant', function(coords)
     end
 end)
 
+RegisterNetEvent('ps-weedplanting:server:GetFullWateringCan', function(netId)
+   
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+    if exports.ox_inventory:RemoveItem(src, Shared.EmptyCanItem, 1) and exports.ox_inventory:RemoveItem(src, Shared.WaterItem, 1) then
+        exports.ox_inventory:AddItem(src, Shared.FullCanItem, 1)
+        lib.notify(src, {description = 'Watering Can Filled', type = 'success'})
+    end
+end)
+
 --- Callbacks
 
-
-
-lib.callback.register('ps-weedplanting:server:GetPlantData', function(source, netId)
+QBCore.Functions.CreateCallback('ps-weedplanting:server:GetPlantData', function(source, cb, netId)
     local entity = NetworkGetEntityFromNetworkId(netId)
-    if not WeedPlants[entity] then return nil end
-    return {
+    if not WeedPlants[entity] then cb(nil) return end
+    local temp = {
         id = WeedPlants[entity].id,
         coords = WeedPlants[entity].coords,
         time = WeedPlants[entity].time,
@@ -387,12 +389,26 @@ lib.callback.register('ps-weedplanting:server:GetPlantData', function(source, ne
         health = calcHealth(entity),
         growth = calcGrowth(entity)
     }
+    cb(temp)
 end)
 
 --- Items
 
 QBCore.Functions.CreateUseableItem(Shared.FemaleSeed, function(source)
-    TriggerClientEvent("ps-weedplanting:client:UseWeedSeed", source)
+    local src = source
+	local Player = QBCore.Functions.GetPlayer(src)
+    local tub = Player.Functions.GetItemByName(Shared.PlantTubItem)
+	
+    if tub ~= nil then
+        TriggerClientEvent("ps-weedplanting:client:UseWeedSeed", source)
+    else
+        lib.notify(src, {description = 'You dont have tub to plant the seed in', type = 'error'})
+    end
+end)
+
+QBCore.Functions.CreateUseableItem(Shared.EmptyCanItem, function(source)
+    local src = source
+    TriggerClientEvent("ps-weedplanting:client:OpenFillWaterMenu", src)
 end)
 
 
